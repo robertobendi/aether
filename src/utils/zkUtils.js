@@ -1,9 +1,7 @@
 /**
- * Zero-knowledge proof ticket system using Mina Protocol
- * This implementation uses Mina's o1js library for ZK proofs
- * 
- * Note: This is a simplified implementation - we're not using the full
- * TypeScript decorators since this project is using plain JavaScript
+ * Enhanced Zero-knowledge proof ticket system using Mina Protocol
+ * This implementation uses Mina's o1js library for ZK proofs with
+ * added proof generation and verification capabilities
  */
 import {
   Poseidon,
@@ -12,7 +10,11 @@ import {
   PrivateKey,
   PublicKey,
   Mina,
-  CircuitString
+  CircuitString,
+  ZkProgram,
+  SelfProof,
+  verify,
+  Struct
 } from 'o1js';
 
 // Define a Merkle tree depth for ticket storage
@@ -24,14 +26,70 @@ const ticketMerkleTree = new MerkleTree(TREE_HEIGHT);
 // In-memory registry for our tickets
 let registeredTickets = {};
 
+// Define a ticket structure for ZK proofs
+class TicketInfo extends Struct({
+  eventId: Field,
+  ticketId: Field,
+  timestamp: Field
+}) {}
+
+// Define our ZkProgram for ticket verification
+const TicketZkProgram = ZkProgram({
+  name: 'aether-ticket-system',
+  publicInput: TicketInfo,
+  publicOutput: Field,
+
+  methods: {
+    // Generate a ticket proof
+    generateTicket: {
+      privateInputs: [
+        Field, // email hash (private)
+        Field, // name hash (private)
+        Field  // timestamp
+      ],
+
+      method(
+        publicInput,
+        emailHash,
+        nameHash,
+        timestampField
+      ) {
+        // Make sure timestamp matches public input
+        timestampField.assertEquals(publicInput.timestamp);
+        
+        // Private inputs - information that should be kept private
+        const privateInputs = Poseidon.hash([
+          emailHash,
+          nameHash,
+          timestampField
+        ]);
+        
+        // Public inputs - information that can be shared
+        const publicInputs = Poseidon.hash([
+          publicInput.eventId,
+          publicInput.ticketId
+        ]);
+        
+        // Generate the final hash combining public and private data
+        const finalHash = Poseidon.hash([publicInputs, privateInputs]);
+        
+        // Return the hash as public output
+        return finalHash;
+      }
+    }
+  }
+});
+
+// Track ZK program compilation status
+let isCompiled = false;
+let verificationKey = null;
+
 /**
- * Initialize the Mina network connection
- * This is a simplified version without actual contract deployment
+ * Initialize the Mina network and ZK program
  */
 export const initMinaNetwork = async () => {
   try {
     // For development, we'll use a local network
-    // In production, switch to Berkeley testnet
     const Local = Mina.LocalBlockchain();
     Mina.setActiveInstance(Local);
     
@@ -39,14 +97,29 @@ export const initMinaNetwork = async () => {
     const privateKey = PrivateKey.random();
     const publicKey = privateKey.toPublicKey();
     
+    // Compile ZK program if not already compiled
+    if (!isCompiled) {
+      try {
+        console.log('Compiling ZK program...');
+        const result = await TicketZkProgram.compile();
+        verificationKey = result.verificationKey;
+        isCompiled = true;
+        console.log('ZK program compiled successfully');
+      } catch (err) {
+        console.warn('ZK program compilation failed:', err);
+        // Continue without ZK program
+      }
+    }
+    
     return {
       networkInitialized: true,
       privateKey,
-      publicKey
+      publicKey,
+      zkReady: isCompiled
     };
   } catch (error) {
     console.error('Failed to initialize Mina network:', error);
-    return { networkInitialized: false };
+    return { networkInitialized: false, zkReady: false };
   }
 };
 
@@ -64,7 +137,20 @@ const getMinaInstance = async () => {
 };
 
 /**
- * Generate a ticket hash using Poseidon hash (Mina's preferred hash function)
+ * Helper to convert a string to a Field
+ */
+const stringToField = (str) => {
+  try {
+    // Try to use CircuitString if available
+    return CircuitString.fromString(str).hash();
+  } catch (error) {
+    // Fallback to simple hash
+    return Field(hashStringToNumber(str));
+  }
+};
+
+/**
+ * Generate a ticket hash using Poseidon hash with ZK proof if available
  * @param {string} eventId - ID of the event
  * @param {string} email - User's email (private)
  * @param {string} name - User's name (private)
@@ -74,27 +160,25 @@ const getMinaInstance = async () => {
 export const generateTicketProof = async (eventId, email, name, ticketId) => {
   try {
     // Initialize Mina (or get existing instance)
-    await getMinaInstance();
+    const instance = await getMinaInstance();
     
     // Convert inputs to Field values for Poseidon hashing
-    // First convert to strings and then to Field values
     const eventIdStr = eventId.toString();
     const emailStr = email.toString();
     const nameStr = name.toString();
     const ticketIdStr = ticketId.toString();
     const timestamp = Date.now().toString();
     
-    // Use CircuitString to convert text to circuit-compatible format
     let eventIdField, emailField, nameField, ticketIdField, timestampField;
     
     try {
-      eventIdField = CircuitString.fromString(eventIdStr).hash();
-      emailField = CircuitString.fromString(emailStr).hash();
-      nameField = CircuitString.fromString(nameStr).hash();
-      ticketIdField = CircuitString.fromString(ticketIdStr).hash();
+      eventIdField = stringToField(eventIdStr);
+      emailField = stringToField(emailStr);
+      nameField = stringToField(nameStr);
+      ticketIdField = stringToField(ticketIdStr);
       timestampField = Field(parseInt(timestamp));
     } catch (error) {
-      console.error('Error converting to Circuit values:', error);
+      console.error('Error converting to Field values:', error);
       // Fallback to manual Field creation
       eventIdField = Field(hashStringToNumber(eventIdStr));
       emailField = Field(hashStringToNumber(emailStr));
@@ -103,21 +187,54 @@ export const generateTicketProof = async (eventId, email, name, ticketId) => {
       timestampField = Field(parseInt(timestamp));
     }
     
-    // Private inputs - information that should be kept private
-    const privateInputs = Poseidon.hash([
-      emailField,
-      nameField,
-      timestampField
-    ]);
+    // Generate ZK proof if available
+    let hashValue, proofJSON = null;
     
-    // Public inputs - information that can be shared
-    const publicInputs = Poseidon.hash([
-      eventIdField,
-      ticketIdField
-    ]);
-    
-    // Generate the final hash combining public and private data
-    const hashValue = Poseidon.hash([publicInputs, privateInputs]);
+    if (instance.zkReady && isCompiled) {
+      try {
+        console.log('Generating ZK proof...');
+        
+        // Create public input
+        const publicInput = new TicketInfo({
+          eventId: eventIdField,
+          ticketId: ticketIdField,
+          timestamp: timestampField
+        });
+        
+        // Generate the proof
+        const { proof, publicOutput } = await TicketZkProgram.generateTicket(
+          publicInput,
+          emailField,
+          nameField,
+          timestampField
+        );
+        
+        // Get hash value and proof
+        hashValue = publicOutput;
+        proofJSON = proof.toJSON();
+        
+        console.log('Generated ZK proof successfully');
+      } catch (error) {
+        console.error('ZK proof generation failed:', error);
+        // Fall back to standard hash approach
+        hashValue = generateStandardHash(
+          eventIdField, 
+          emailField, 
+          nameField, 
+          ticketIdField, 
+          timestampField
+        );
+      }
+    } else {
+      // Use standard hash approach
+      hashValue = generateStandardHash(
+        eventIdField, 
+        emailField, 
+        nameField, 
+        ticketIdField, 
+        timestampField
+      );
+    }
     
     // Find an empty slot in the Merkle tree
     const leafIndex = getEmptyLeafIndex();
@@ -128,7 +245,7 @@ export const generateTicketProof = async (eventId, email, name, ticketId) => {
     // Store in localStorage for client-side persistence
     await storeTicketHash(hashValue.toString(), eventId, leafIndex);
     
-    console.log('Generated Mina-based ZK proof for ticket:', hashValue.toString());
+    console.log('Generated ticket proof:', hashValue.toString());
     
     // Return the proof for the QR code
     return {
@@ -139,15 +256,16 @@ export const generateTicketProof = async (eventId, email, name, ticketId) => {
       // This proof data would be added to the QR code
       demoProof: {
         hashValue: hashValue.toString(),
-        protocol: "mina-poseidon",
+        protocol: instance.zkReady ? "mina-poseidon-zk" : "mina-poseidon",
         leafIndex: leafIndex,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        proofJSON: proofJSON
       }
     };
   } catch (error) {
-    console.error('Error generating Mina-based proof:', error);
+    console.error('Error generating proof:', error);
     
-    // Fall back to simple hash-based approach if Mina fails
+    // Fall back to simple hash-based approach if everything fails
     const simpleHash = await fallbackGenerateHash(eventId, email, name, ticketId);
     
     return {
@@ -162,6 +280,27 @@ export const generateTicketProof = async (eventId, email, name, ticketId) => {
       }
     };
   }
+};
+
+/**
+ * Generate a standard hash using Poseidon
+ */
+const generateStandardHash = (eventIdField, emailField, nameField, ticketIdField, timestampField) => {
+  // Private inputs - information that should be kept private
+  const privateInputs = Poseidon.hash([
+    emailField,
+    nameField,
+    timestampField
+  ]);
+  
+  // Public inputs - information that can be shared
+  const publicInputs = Poseidon.hash([
+    eventIdField,
+    ticketIdField
+  ]);
+  
+  // Generate the final hash combining public and private data
+  return Poseidon.hash([publicInputs, privateInputs]);
 };
 
 /**
@@ -257,13 +396,14 @@ export const storeTicketHash = async (hash, eventId, leafIndex) => {
 };
 
 /**
- * Verify a ticket hash using Mina
+ * Verify a ticket hash
  * @param {string} hash - The ticket hash
  * @param {string} eventId - ID of the event
+ * @param {object|null} proofJSON - The ZK proof JSON if available
  * @param {number} leafIndex - Index in the Merkle tree
  * @returns {Promise<boolean>} - Whether the ticket is valid
  */
-export const verifyTicketHash = async (hash, eventId, leafIndex = 0) => {
+export const verifyTicketHash = async (hash, eventId, proofJSON = null, leafIndex = 0) => {
   try {
     // First check local storage
     const existingTickets = JSON.parse(localStorage.getItem('aetherTickets') || '{}');
@@ -274,28 +414,50 @@ export const verifyTicketHash = async (hash, eventId, leafIndex = 0) => {
       return false;
     }
     
-    // If Mina is available, try to do Merkle tree verification
-    try {
-      await getMinaInstance();
-      
-      // Get the saved ticket from the Merkle tree
-      const leafValue = ticketMerkleTree.getNode(0, BigInt(leafIndex));
-      
-      // This would be a Merkle proof verification in a full implementation
-      // For now we just check if the hash matches what we have in the tree
-      if (leafValue && leafValue.toString() === hash) {
-        console.log('Verified ticket with Mina Merkle tree');
-        return true;
+    // Get Mina instance
+    const instance = await getMinaInstance();
+    
+    // Verify ZK proof if available
+    if (instance.zkReady && isCompiled && proofJSON) {
+      try {
+        console.log('Verifying ZK proof...');
+        const isValidProof = await verify(proofJSON, verificationKey);
+        
+        if (isValidProof) {
+          console.log('ZK proof verified successfully');
+          return true;
+        } else {
+          console.warn('ZK proof verification failed');
+          // Fall back to Merkle verification
+        }
+      } catch (error) {
+        console.error('Error verifying ZK proof:', error);
+        // Fall back to Merkle verification
       }
-      
-      // Fall back to local verification if Merkle verification fails
-      console.log('Merkle verification failed, falling back to local check');
-      return isLocallyValid;
-    } catch (error) {
-      console.warn('Mina verification unavailable, using local verification:', error);
-      // Fall back to local verification only
-      return isLocallyValid;
     }
+    
+    // If Mina is available, try to do Merkle tree verification
+    if (instance.networkInitialized) {
+      try {
+        // Get the saved ticket from the Merkle tree
+        const leafValue = ticketMerkleTree.getNode(0, BigInt(leafIndex));
+        
+        // Check if the hash matches what we have in the tree
+        if (leafValue && leafValue.toString() === hash) {
+          console.log('Verified ticket with Mina Merkle tree');
+          return true;
+        }
+        
+        // Fall back to local verification if Merkle verification fails
+        console.log('Merkle verification failed, falling back to local check');
+      } catch (error) {
+        console.warn('Merkle verification failed:', error);
+        // Fall back to local verification
+      }
+    }
+    
+    // Fall back to local verification
+    return isLocallyValid;
   } catch (error) {
     console.error("Error in ticket verification:", error);
     return false;
@@ -316,6 +478,8 @@ export const processQRData = async (data) => {
     const eventId = qrData.eventId;
     let leafIndex = 0;
     let hashValue = null;
+    let proofJSON = null;
+    let protocol = "unknown";
     
     // Handle different QR data formats
     if (qrData.hash && typeof qrData.hash === 'string') {
@@ -324,8 +488,12 @@ export const processQRData = async (data) => {
         const hashData = JSON.parse(qrData.hash);
         if (hashData.proof && hashData.proof.hashValue) {
           hashValue = hashData.proof.hashValue;
+          protocol = hashData.proof.protocol || protocol;
           if (hashData.proof.leafIndex !== undefined) {
             leafIndex = hashData.proof.leafIndex;
+          }
+          if (hashData.proof.proofJSON) {
+            proofJSON = hashData.proof.proofJSON;
           }
         }
       } catch {
@@ -334,8 +502,12 @@ export const processQRData = async (data) => {
       }
     } else if (qrData.proof && qrData.proof.hashValue) {
       hashValue = qrData.proof.hashValue;
+      protocol = qrData.proof.protocol || protocol;
       if (qrData.proof.leafIndex !== undefined) {
         leafIndex = qrData.proof.leafIndex;
+      }
+      if (qrData.proof.proofJSON) {
+        proofJSON = qrData.proof.proofJSON;
       }
     }
     
@@ -343,18 +515,34 @@ export const processQRData = async (data) => {
       throw new Error("Invalid QR code format");
     }
     
-    // Verify ticket using Mina
-    const isValid = await verifyTicketHash(hashValue, eventId, leafIndex);
+    // Verify ticket
+    const isValid = await verifyTicketHash(hashValue, eventId, proofJSON, leafIndex);
     
     return {
       isValid,
       eventId,
       ticketId: qrData.ticketId || "Unknown",
-      hashValue
+      hashValue,
+      protocol
     };
   } catch (error) {
     console.error("Error processing QR data:", error);
     throw error;
+  }
+};
+
+/**
+ * Initialize the ZK system - call this when your app starts
+ */
+export const initializeZkSystem = async () => {
+  console.log('Initializing ZK system...');
+  try {
+    const instance = await getMinaInstance();
+    console.log('ZK system initialized:', instance.zkReady ? 'with ZK proof support' : 'without ZK proof support');
+    return instance;
+  } catch (error) {
+    console.error('Failed to initialize ZK system:', error);
+    return { initialized: false, error: error.message };
   }
 };
 
