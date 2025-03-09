@@ -1,24 +1,33 @@
 // websiteInfo.js
 export default {
   site: {
-    name: "RePlate",
-    description: "A modern React application template crafted with attention to detail",
-    author: "Roberto Bendinelli",
+    name: "ZK Ticket",
+    description:
+      "A decentralized ticketing platform using zero-knowledge proofs for privacy and security",
+    author: "ZK Ticket Team",
     links: {
-      github: "https://github.com/robertobendi",
-      documentation: "/docs"
-    }
+      github: "https://github.com/zkticket",
+      documentation: "/docs",
+    },
   },
   navigation: {
     menu: [
       {
         label: "Home",
-        path: "/"
+        path: "/",
       },
       {
-        label: "Page 1",
-        path: "/page1"
-      }
-    ]
-  }
-}
+        label: "Events",
+        path: "/events",
+      },
+      {
+        label: "My Tickets",
+        path: "/tickets",
+      },
+      {
+        label: "Verify",
+        path: "/verify",
+      },
+    ],
+  },
+};
