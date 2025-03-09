@@ -1,12 +1,12 @@
 // websiteInfo.js
 export default {
   site: {
-    name: "ZK Ticket",
+    name: "Aether",
     description:
       "A decentralized ticketing platform using zero-knowledge proofs for privacy and security",
-    author: "ZK Ticket Team",
+    author: "Aether Ticket Team",
     links: {
-      github: "https://github.com/zkticket",
+      github: "https://github.com/aetherticket",
       documentation: "/docs",
     },
   },

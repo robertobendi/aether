@@ -3,6 +3,7 @@ import { CalendarDays, MapPin, Clock, X, Download } from 'lucide-react';
 import QRCode from 'qrcode';
 import { generateTicketProof, storeTicketHash } from '../utils/zkUtils';
 import websiteInfo from '../utils/websiteInfo';
+import AnimatedBackground from '../components/AnimatedBackground';
 
 function Events() {
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -140,7 +141,7 @@ function Events() {
     // Create a download link for the QR code
     const downloadLink = document.createElement('a');
     downloadLink.href = qrCodeUrl;
-    downloadLink.download = `zk-ticket-${selectedEvent.id}.png`;
+    downloadLink.download = `aether-ticket-${selectedEvent.id}.png`;
     document.body.appendChild(downloadLink);
     downloadLink.click();
     document.body.removeChild(downloadLink);
@@ -154,8 +155,11 @@ function Events() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-5xl mx-auto p-4 md:p-8 lg:p-12">
+    <div className="relative min-h-screen bg-background">
+      {/* Add animated background */}
+      <AnimatedBackground />
+      
+      <div className="relative max-w-5xl mx-auto p-4 md:p-8 lg:p-12">
         <h1 className="text-3xl font-semibold mb-8 text-text-primary">
           Upcoming Events
         </h1>

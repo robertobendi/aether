@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Globe, ShieldCheck, Zap, Ticket } from "lucide-react";
-import { motion } from "framer-motion";
+import AnimatedBackground from "../components/AnimatedBackground";
 
 function Home() {
   const [showDemo, setShowDemo] = useState(false);
@@ -14,31 +14,20 @@ function Home() {
 
   const demoSteps = [
     { title: "Browse Events", description: "Find free events in your area", icon: <Ticket className="w-5 h-5" /> },
-    { title: "Get Ticket", description: "Claim your ZK ticket without exposing personal data", icon: <ShieldCheck className="w-5 h-5" /> },
+    { title: "Get Ticket", description: "Claim your Aether ticket without exposing personal data", icon: <ShieldCheck className="w-5 h-5" /> },
     { title: "Verify Entry", description: "Present your QR code for instant verification", icon: <Zap className="w-5 h-5" /> }
   ];
 
   return (
     <div className="relative min-h-screen bg-background font-sans overflow-hidden">
       {/* Animated Background */}
-      <div className="absolute inset-0 overflow-hidden">
-        <motion.div 
-          className="absolute w-[600px] h-[600px] bg-accent opacity-30 blur-3xl rounded-full top-[-100px] left-[-200px]"
-          animate={{ scale: [1, 1.2, 1], borderRadius: ["50%", "45%", "50%"] }}
-          transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-        />
-        <motion.div 
-          className="absolute w-[500px] h-[500px] bg-primary opacity-30 blur-3xl rounded-full bottom-[-150px] right-[-150px]"
-          animate={{ scale: [1, 1.2, 1], borderRadius: ["50%", "40%", "50%"] }}
-          transition={{ duration: 7, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-        />
-      </div>
+      <AnimatedBackground />
 
       {/* Hero Section */}
       <div className="relative py-20 px-6 text-center">
         <div className="max-w-3xl mx-auto">
           <h1 className="text-5xl font-bold text-text-primary mb-6">
-            <span className="text-accent">ZK</span> Ticket
+            <span className="text-accent">Aether</span>
           </h1>
           <p className="text-text-secondary text-lg mb-8">
             A decentralized ticketing platform powered by zero-knowledge proofs. 
@@ -67,7 +56,7 @@ function Home() {
         <div className="relative px-6 py-8 mb-12">
           <div className="max-w-3xl mx-auto">
             <h2 className="text-2xl font-semibold text-text-primary mb-8 text-center">
-              How ZK Ticket Works
+              How Aether Ticket Works
             </h2>
             
             <div className="relative flex flex-col md:flex-row gap-6 mb-8">
@@ -93,7 +82,7 @@ function Home() {
                 Zero-Knowledge Privacy
               </h3>
               <p className="text-text-secondary mb-4">
-                ZK Ticket generates cryptographic proofs that verify ticket ownership 
+                Aether Ticket generates cryptographic proofs that verify ticket ownership 
                 without revealing any personal data. Your information never leaves your device.
               </p>
               <ul className="space-y-2 text-text-secondary text-sm">

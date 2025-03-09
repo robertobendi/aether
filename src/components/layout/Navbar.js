@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import websiteInfo from './../../utils/websiteInfo';
-import logo from './../../assets/img/logo.png';
 
 function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -14,7 +13,9 @@ function Navbar() {
             to="/" 
             className="flex items-center space-x-2 hover:opacity-75 transition-all duration-fast"
           >
-            <img src={logo} alt="Logo" className="h-6 w-auto" />
+            <span className="text-xl font-bold text-text-primary">
+              <span className="text-accent">Aether</span>
+            </span>
           </Link>
 
           <div className="hidden md:flex items-center space-x-6">
@@ -48,7 +49,7 @@ function Navbar() {
 
         {isOpen && (
           <div 
-            className="md:hidden absolute left-0 right-0 p-4 bg-surface border-b border-border-primary shadow-lg transition-all duration-DEFAULT"
+            className="md:hidden absolute left-0 right-0 p-4 bg-surface border-b border-border-primary shadow-lg transition-all duration-DEFAULT z-50"
           >
             <div className="flex flex-col space-y-3">
               {websiteInfo.navigation.menu.map((item) => (
