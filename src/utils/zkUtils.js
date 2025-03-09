@@ -1,7 +1,6 @@
 /**
- * Enhanced Zero-knowledge proof ticket system using Mina Protocol
- * This implementation uses Mina's o1js library for ZK proofs with
- * added proof generation and verification capabilities
+ * Real Zero-knowledge proof ticket system using Mina Protocol
+ * This implementation uses Mina's o1js library for ZK proofs
  */
 import {
   Poseidon,
@@ -89,6 +88,21 @@ let verificationKey = null;
  */
 export const initMinaNetwork = async () => {
   try {
+    // Force program compilation on init
+    if (!isCompiled) {
+      try {
+        console.log('Compiling ZK program...');
+        const result = await TicketZkProgram.compile();
+        verificationKey = result.verificationKey;
+        isCompiled = true;
+        console.log('ZK program compiled successfully');
+      } catch (err) {
+        console.error('ZK program compilation failed:', err);
+        isCompiled = false;
+        throw new Error('Failed to compile ZK program: ' + err.message);
+      }
+    }
+    
     // For development, we'll use a local network
     const Local = Mina.LocalBlockchain();
     Mina.setActiveInstance(Local);
@@ -96,18 +110,6 @@ export const initMinaNetwork = async () => {
     // Generate a keypair for signing
     const privateKey = PrivateKey.random();
     const publicKey = privateKey.toPublicKey();
-    
-    // Always compile ZK program
-    try {
-      console.log('Compiling ZK program...');
-      const result = await TicketZkProgram.compile();
-      verificationKey = result.verificationKey;
-      isCompiled = true;
-      console.log('ZK program compiled successfully');
-    } catch (err) {
-      console.warn('ZK program compilation failed:', err);
-      isCompiled = false;
-    }
     
     return {
       networkInitialized: true,
@@ -148,50 +150,7 @@ const stringToField = (str) => {
 };
 
 /**
- * Force ZK proof generation, using simpler parameters if needed
- */
-const forceZkProofGeneration = async (publicInput, emailHash, nameHash, timestampField) => {
-  console.log('Forcing ZK proof generation with simplified parameters...');
-  
-  // Create simpler Field values if needed (for testing)
-  const simplePublicInput = new TicketInfo({
-    eventId: Field(1),
-    ticketId: Field(2),
-    timestamp: Field(3)
-  });
-  
-  const simpleEmailHash = Field(4);
-  const simpleNameHash = Field(5);
-  const simpleTimestamp = Field(3);
-  
-  try {
-    // Try with provided parameters first
-    console.log('Attempting proof with actual parameters...');
-    return await TicketZkProgram.generateTicket(
-      publicInput,
-      emailHash,
-      nameHash,
-      timestampField
-    );
-  } catch (e) {
-    console.warn('Failed with actual parameters, trying with simplified params:', e);
-    // Fall back to simple parameters
-    try {
-      return await TicketZkProgram.generateTicket(
-        simplePublicInput,
-        simpleEmailHash,
-        simpleNameHash,
-        simpleTimestamp
-      );
-    } catch (e2) {
-      console.error('Failed to generate proof even with simplified params:', e2);
-      throw new Error('Could not generate ZK proof with any parameters');
-    }
-  }
-};
-
-/**
- * Generate a ticket hash using Poseidon hash with ZK proof if available
+ * Generate a ticket hash using Poseidon hash with ZK proof
  * @param {string} eventId - ID of the event
  * @param {string} email - User's email (private)
  * @param {string} name - User's name (private)
@@ -199,86 +158,59 @@ const forceZkProofGeneration = async (publicInput, emailHash, nameHash, timestam
  * @returns {Promise<Object>} - Ticket proof
  */
 export const generateTicketProof = async (eventId, email, name, ticketId) => {
+  console.log('Starting real ZK proof generation...');
+  
   try {
     // Initialize Mina (or get existing instance)
     const instance = await getMinaInstance();
+    
+    if (!isCompiled) {
+      throw new Error('ZK program not compiled - cannot generate proofs');
+    }
     
     // Convert inputs to Field values for Poseidon hashing
     const eventIdStr = eventId.toString();
     const emailStr = email.toString();
     const nameStr = name.toString();
     const ticketIdStr = ticketId.toString();
-    const timestampStr = Date.now().toString();
+    const timestamp = Math.floor(Date.now() / 1000) % (2**30); // Use seconds instead of ms for Field range
     
-    let eventIdField, emailField, nameField, ticketIdField, timestampField;
+    console.log('Converting inputs to Field values...');
     
-    try {
-      eventIdField = stringToField(eventIdStr);
-      emailField = stringToField(emailStr);
-      nameField = stringToField(nameStr);
-      ticketIdField = stringToField(ticketIdStr);
-      timestampField = Field(parseInt(timestampStr) % (2**30)); // Keep within Field range
-    } catch (error) {
-      console.error('Error converting to Field values:', error);
-      // Fallback to manual Field creation
-      eventIdField = Field(hashStringToNumber(eventIdStr));
-      emailField = Field(hashStringToNumber(emailStr));
-      nameField = Field(hashStringToNumber(nameStr));
-      ticketIdField = Field(hashStringToNumber(ticketIdStr));
-      timestampField = Field(hashStringToNumber(timestampStr));
-    }
+    // Ensure all inputs are within Field range
+    let eventIdField = Field(hashStringToNumber(eventIdStr));
+    let emailField = Field(hashStringToNumber(emailStr));
+    let nameField = Field(hashStringToNumber(nameStr));
+    let ticketIdField = Field(hashStringToNumber(ticketIdStr));
+    let timestampField = Field(timestamp);
     
-    // Generate ZK proof if available
-    let hashValue, proofJSON = null;
+    console.log('Creating public input structure...');
     
-    // Intentionally introduce a delay to simulate proof generation
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Create public input
+    const publicInput = new TicketInfo({
+      eventId: eventIdField,
+      ticketId: ticketIdField,
+      timestamp: timestampField
+    });
     
-    if (isCompiled) {
-      try {
-        console.log('Generating real ZK proof...');
-        
-        // Create public input
-        const publicInput = new TicketInfo({
-          eventId: eventIdField,
-          ticketId: ticketIdField,
-          timestamp: timestampField
-        });
-        
-        // Generate the proof, forcing it if needed
-        const { proof, publicOutput } = await forceZkProofGeneration(
-          publicInput,
-          emailField,
-          nameField,
-          timestampField
-        );
-        
-        // Get hash value and proof
-        hashValue = publicOutput;
-        proofJSON = proof.toJSON();
-        
-        console.log('Generated real ZK proof successfully:', proofJSON);
-      } catch (error) {
-        console.error('ZK proof generation failed despite forcing:', error);
-        // Fall back to standard hash approach
-        hashValue = generateStandardHash(
-          eventIdField, 
-          emailField, 
-          nameField, 
-          ticketIdField, 
-          timestampField
-        );
-      }
-    } else {
-      // Use standard hash approach
-      hashValue = generateStandardHash(
-        eventIdField, 
-        emailField, 
-        nameField, 
-        ticketIdField, 
-        timestampField
-      );
-    }
+    console.log('Executing ZK program to generate proof...');
+    
+    // Generate the actual ZK proof - this is the real computation
+    const { proof, publicOutput } = await TicketZkProgram.generateTicket(
+      publicInput,
+      emailField,
+      nameField,
+      timestampField
+    );
+    
+    console.log('ZK proof generated successfully!');
+    
+    // Convert proof to JSON for storage/transmission
+    const proofJSON = proof.toJSON();
+    console.log('Proof size:', JSON.stringify(proofJSON).length, 'bytes');
+    
+    // Get the hash value from the output
+    const hashValue = publicOutput;
     
     // Find an empty slot in the Merkle tree
     const leafIndex = getEmptyLeafIndex();
@@ -289,121 +221,26 @@ export const generateTicketProof = async (eventId, email, name, ticketId) => {
     // Store in localStorage for client-side persistence
     await storeTicketHash(hashValue.toString(), eventId, leafIndex);
     
-    console.log('Generated ticket proof with hash:', hashValue.toString());
+    console.log('Generated real ZK proof with hash:', hashValue.toString());
     
-    // Ensure a consistent proof JSON for demo purposes if not available
-    if (!proofJSON) {
-      proofJSON = {
-        // Create a simple mock proof structure
-        publicInput: {
-          eventId: eventIdField.toString(),
-          ticketId: ticketIdField.toString(),
-          timestamp: timestampField.toString()
-        },
-        publicOutput: hashValue.toString(),
-        proof: "mina-demo-proof-" + Math.random().toString(36).substring(2)
-      };
-    }
-    
-    // Return the proof for the QR code - use consistent property names
+    // Return the proof for the QR code
     return {
       publicInputs: {
         eventId,
         ticketId
       },
-      // This proof data would be added to the QR code
       demoProof: {
         hashValue: hashValue.toString(),
-        protocol: proofJSON ? "mina-poseidon-zk" : "mina-poseidon",
+        protocol: "mina-poseidon-zk",  // This indicates a real ZK proof
         leafIndex: leafIndex,
         timestamp: Date.now(),
-        proofJSON: proofJSON  // Always include a proof JSON
+        proofJSON: proofJSON
       }
     };
   } catch (error) {
-    console.error('Error generating proof:', error);
-    
-    // Fall back to simple hash-based approach if everything fails
-    const simpleHash = await fallbackGenerateHash(eventId, email, name, ticketId);
-    
-    // Create a simple mock proof structure for demo purposes
-    const mockProofJSON = {
-      publicInput: {
-        eventId,
-        ticketId,
-        timestamp: Date.now().toString()
-      },
-      publicOutput: simpleHash,
-      proof: "fallback-demo-proof-" + Math.random().toString(36).substring(2)
-    };
-    
-    return {
-      publicInputs: {
-        eventId,
-        ticketId
-      },
-      demoProof: {
-        hashValue: simpleHash,
-        protocol: "fallback-hash",
-        timestamp: Date.now(),
-        proofJSON: mockProofJSON // Always include a proof structure
-      }
-    };
+    console.error('Error generating real ZK proof:', error);
+    throw new Error('Real ZK proof generation failed. Please try again: ' + error.message);
   }
-};
-
-/**
- * Generate a standard hash using Poseidon
- */
-const generateStandardHash = (eventIdField, emailField, nameField, ticketIdField, timestampField) => {
-  // Private inputs - information that should be kept private
-  const privateInputs = Poseidon.hash([
-    emailField,
-    nameField,
-    timestampField
-  ]);
-  
-  // Public inputs - information that can be shared
-  const publicInputs = Poseidon.hash([
-    eventIdField,
-    ticketIdField
-  ]);
-  
-  // Generate the final hash combining public and private data
-  return Poseidon.hash([publicInputs, privateInputs]);
-};
-
-/**
- * Fallback hash function when Mina isn't available
- */
-const fallbackGenerateHash = async (eventId, email, name, ticketId) => {
-  // Convert to string and concatenate
-  const combined = `${eventId}-${email}-${name}-${ticketId}-${Date.now()}`;
-  
-  // Use browser's crypto API for a secure hash
-  try {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(combined);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  } catch (error) {
-    // Last resort fallback
-    return simpleHashFallback(combined);
-  }
-};
-
-/**
- * Very simple hash function as absolute last resort
- */
-const simpleHashFallback = (str) => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return Math.abs(hash).toString(16).padStart(8, '0');
 };
 
 /**
@@ -484,13 +321,15 @@ export const verifyTicketHash = async (hash, eventId, proofJSON = null, leafInde
       return false;
     }
     
-    // Get Mina instance
-    const instance = await getMinaInstance();
-    
     // Verify ZK proof if available
     if (isCompiled && proofJSON) {
       try {
         console.log('Verifying ZK proof...');
+        
+        if (!verificationKey) {
+          throw new Error('Verification key not available');
+        }
+        
         const isValidProof = await verify(proofJSON, verificationKey);
         
         if (isValidProof) {
@@ -498,32 +337,22 @@ export const verifyTicketHash = async (hash, eventId, proofJSON = null, leafInde
           return true;
         } else {
           console.warn('ZK proof verification failed');
-          // Fall back to Merkle verification
         }
       } catch (error) {
         console.error('Error verifying ZK proof:', error);
-        // Fall back to Merkle verification
       }
     }
     
-    // If Mina is available, try to do Merkle tree verification
-    if (instance.networkInitialized) {
-      try {
-        // Get the saved ticket from the Merkle tree
-        const leafValue = ticketMerkleTree.getNode(0, BigInt(leafIndex));
-        
-        // Check if the hash matches what we have in the tree
-        if (leafValue && leafValue.toString() === hash) {
-          console.log('Verified ticket with Mina Merkle tree');
-          return true;
-        }
-        
-        // Fall back to local verification if Merkle verification fails
-        console.log('Merkle verification failed, falling back to local check');
-      } catch (error) {
-        console.warn('Merkle verification failed:', error);
-        // Fall back to local verification
+    // If we got here, either there's no ZK proof or verification failed
+    // Fall back to Merkle tree verification
+    try {
+      const leafValue = ticketMerkleTree.getNode(0, BigInt(leafIndex));
+      if (leafValue && leafValue.toString() === hash) {
+        console.log('Verified ticket with Merkle tree');
+        return true;
       }
+    } catch (error) {
+      console.warn('Merkle verification failed:', error);
     }
     
     // Fall back to local verification
