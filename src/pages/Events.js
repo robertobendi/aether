@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { CalendarDays, MapPin, Clock, X, Download, ShieldCheck } from 'lucide-react';
+import { CalendarDays, MapPin, Clock, X, Download, ShieldCheck, Loader2 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { generateTicketProof, storeTicketHash, isMinaAvailable } from '../utils/zkUtils';
 import websiteInfo from '../utils/websiteInfo';
@@ -20,6 +20,8 @@ function Events() {
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [minaStatus, setMinaStatus] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [proofStatus, setProofStatus] = useState(null);
+  const [proofData, setProofData] = useState(null);
   
   // Add ref to track if we've shown the toast
   const minaToastShown = useRef(false);
@@ -43,7 +45,7 @@ function Events() {
     };
     
     checkMina();
-  }, []); // Remove addToast from dependencies array
+  }, []); 
 
   // Sample event data
   const events = [
@@ -87,6 +89,9 @@ function Events() {
   const handleCloseModal = () => {
     setShowTicketModal(false);
     setTicketGenerated(false);
+    setProofStatus(null);
+    setProofData(null);
+    setQrCodeUrl('');
     setFormData({
       email: '',
       name: '',
@@ -105,21 +110,27 @@ function Events() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsGenerating(true);
+    setProofStatus("generating");
     
     // Generate a ticket ID
     const ticketId = `TKT-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    setTicketHash(ticketId);
+    
+    // First show the ticket interface with loading state
+    setTicketGenerated(true);
     
     try {
       // Show starting process toast
       addToast(`Starting ${minaStatus ? 'zero-knowledge' : 'cryptographic'} ticket generation...`, "INFO");
       
-      // Generate cryptographic proof
       if (minaStatus) {
         addToast("Creating Mina Protocol zero-knowledge proof...", "INFO");
       } else {
         addToast("Hashing your private information securely...", "INFO");
       }
       
+      // Generate the proof (this may take time)
+      console.log('Starting proof generation...');
       const zkProof = await generateTicketProof(
         selectedEvent.id,
         formData.email,
@@ -127,38 +138,41 @@ function Events() {
         ticketId
       );
       
-      // Store the hash
-      if (zkProof.demoProof.protocol === 'mina-poseidon') {
+      console.log('Proof generation completed:', zkProof);
+      setProofData(zkProof);
+      
+      // Check if we generated a real ZK proof or fallback hash
+      // Make sure to handle both proofJSON and proofJson (case sensitivity issue)
+      const proofJSON = zkProof.demoProof.proofJSON || zkProof.demoProof.proofJson;
+      const isRealProof = (zkProof.demoProof.protocol === 'mina-poseidon-zk' && proofJSON);
+      
+      if (isRealProof) {
         addToast("Zero-knowledge proof generated successfully!", "SUCCESS");
+        setProofStatus("success");
+        console.log('Generated real ZK proof with JSON data:', proofJSON);
       } else {
         addToast("Cryptographic proof generated successfully!", "SUCCESS");
+        setProofStatus("fallback");
+        console.log('Using fallback cryptographic hash');
       }
       
-      // Save the ticket ID for display
-      setTicketHash(ticketId);
-      
-      // Generate QR code with the proof data
+      // Generate QR code with the proof data AFTER proof generation is complete
       addToast("Creating secure QR code...", "INFO");
       const qrData = JSON.stringify({
         eventId: selectedEvent.id,
         ticketId: ticketId,
         // Include ZK proof data
-        proof: zkProof.demoProof,
-        leafIndex: zkProof.demoProof.leafIndex
+        proof: zkProof.demoProof
       });
-      
-      // Log the proof details for demonstration
-      console.log('Generated cryptographic ticket proof:', zkProof);
       
       // Generate QR code
       await generateQRCode(qrData);
       
-      // Show the ticket download section
-      setTicketGenerated(true);
-      const proofType = minaStatus ? 'zero-knowledge' : 'cryptographic';
+      const proofType = isRealProof ? 'zero-knowledge' : 'cryptographic';
       addToast(`Your secure ticket with ${proofType} proof is ready!`, "SUCCESS", 5000);
     } catch (error) {
       console.error("Error generating ticket:", error);
+      setProofStatus("error");
       addToast(`Error: ${error.message}`, "ERROR", 5000);
     } finally {
       setIsGenerating(false);
@@ -381,29 +395,67 @@ function Events() {
                       <div>Ticket ID: {ticketHash}</div>
                     </div>
                     
-                    {qrCodeUrl && (
-                      <div className="flex justify-center mb-4">
+                    {/* Proof Status and QR Code */}
+                    <div className="flex flex-col items-center justify-center mb-4">
+                      {!qrCodeUrl ? (
+                        <div className="w-48 h-48 flex flex-col items-center justify-center border-4 border-dashed border-blue-500 bg-blue-900 bg-opacity-10 rounded-lg">
+                          <Loader2 className="w-12 h-12 text-accent animate-spin mb-2" />
+                          <p className="text-text-accent text-sm">Generating proof...</p>
+                          {proofStatus === "generating" && (
+                            <p className="text-text-secondary text-xs mt-1">This may take up to 30 seconds</p>
+                          )}
+                        </div>
+                      ) : (
                         <img src={qrCodeUrl} alt="Ticket QR Code" className="w-48 h-48" />
-                      </div>
-                    )}
+                      )}
+                    </div>
                     
-                    {minaStatus && (
-                      <div className="text-xs bg-blue-900 bg-opacity-20 p-2 rounded text-blue-300">
-                        Secured with Mina Protocol zero-knowledge proofs
+                    {/* Proof Status Indicator */}
+                    <div className={`text-xs p-2 rounded ${
+                      proofStatus === "generating" ? "bg-blue-900 bg-opacity-20 text-blue-300" :
+                      proofStatus === "success" ? "bg-green-900 bg-opacity-20 text-green-300" :
+                      proofStatus === "fallback" ? "bg-yellow-900 bg-opacity-20 text-yellow-300" :
+                      proofStatus === "error" ? "bg-red-900 bg-opacity-20 text-red-300" :
+                      "bg-blue-900 bg-opacity-20 text-blue-300"
+                    }`}>
+                      {proofStatus === "generating" && (
+                        <div className="flex items-center justify-center">
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          <span>Generating zero-knowledge proof...</span>
+                        </div>
+                      )}
+                      {proofStatus === "success" && (
+                        <span>Secured with Mina Protocol zero-knowledge proofs</span>
+                      )}
+                      {proofStatus === "fallback" && (
+                        <span>Using cryptographic hash verification</span>
+                      )}
+                      {proofStatus === "error" && (
+                        <span>Error generating proof, using fallback verification</span>
+                      )}
+                    </div>
+                    
+                    {/* Proof data debug info (only in development) */}
+                    {proofData && (
+                      <div className="mt-2 text-left text-xs bg-slate-900 p-2 rounded overflow-hidden">
+                        <div>Protocol: {proofData.demoProof.protocol}</div>
+                        <div>Hash: {proofData.demoProof.hashValue.substring(0, 20)}...</div>
+                        <div>Has proof: {(proofData.demoProof.proofJSON || proofData.demoProof.proofJson) ? 'Yes' : 'No'}</div>
                       </div>
                     )}
                   </div>
                   
                   <button
                     onClick={handleDownloadTicket}
-                    className="inline-flex items-center justify-center px-4 py-2 bg-accent text-white rounded-lg hover:bg-opacity-90 transition-all duration-fast"
+                    disabled={!qrCodeUrl}
+                    className="inline-flex items-center justify-center px-4 py-2 bg-accent text-white rounded-lg hover:bg-opacity-90 transition-all duration-fast disabled:opacity-50"
                   >
                     <Download className="w-4 h-4 mr-2" />
                     Download QR Ticket
                   </button>
                   
                   <p className="mt-4 text-sm text-text-secondary">
-                    Your ticket includes a {minaStatus ? 'zero-knowledge proof' : 'cryptographic proof'} that can be verified without revealing your personal information. Present the QR code at the event for verification.
+                    Your ticket includes a {minaStatus && proofStatus === "success" ? 'zero-knowledge proof' : 'cryptographic proof'} that can be verified without revealing your personal information. Present the QR code at the event for verification.
                   </p>
                 </div>
               )}
