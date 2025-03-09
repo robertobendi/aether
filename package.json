@@ -12,6 +12,7 @@
     "framer-motion": "^12.4.10",
     "jsqr": "^1.4.0",
     "lucide-react": "^0.468.0",
+    "o1js": "^2.3.0",
     "qr-scanner": "^1.4.2",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",

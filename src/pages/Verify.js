@@ -3,6 +3,7 @@ import { CheckCircle, XCircle, Upload, Camera, X, Calendar, Clock, MapPin, Users
 import jsQR from 'jsqr';
 import AnimatedBackground from '../components/AnimatedBackground';
 import { useToast } from '../components/Toast';
+import { processQRData, isMinaAvailable } from '../utils/zkUtils';
 
 function Verify() {
   const { addToast } = useToast();
@@ -13,6 +14,7 @@ function Verify() {
   const [processing, setProcessing] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [hashDetails, setHashDetails] = useState(null);
+  const [minaStatus, setMinaStatus] = useState(null);
   
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -47,7 +49,25 @@ function Verify() {
     }
   };
 
+  // Check Mina availability on component mount
   useEffect(() => {
+    const checkMina = async () => {
+      try {
+        const available = await isMinaAvailable();
+        setMinaStatus(available);
+        if (available) {
+          addToast("Mina Protocol connected successfully", "SUCCESS");
+        } else {
+          addToast("Using local verification (Mina unavailable)", "INFO");
+        }
+      } catch (error) {
+        console.error("Error checking Mina:", error);
+        setMinaStatus(false);
+      }
+    };
+    
+    checkMina();
+    
     return () => {
       // Clean up on component unmount
       stopCamera();
@@ -124,8 +144,8 @@ function Verify() {
           stopCamera();
           addToast("QR code detected!", "SUCCESS");
           
-          // Process the QR code
-          processQRData(code.data);
+          // Process the QR code with async handling
+          handleQRData(code.data);
           return;
         }
       } catch (e) {
@@ -137,52 +157,31 @@ function Verify() {
     requestAnimationRef.current = requestAnimationFrame(scanQRCode);
   };
 
-  const processQRData = (data) => {
+  const handleQRData = async (data) => {
     try {
+      setProcessing(true);
       addToast("Processing cryptographic data...", "INFO");
       
-      // Parse the QR data
-      const qrData = JSON.parse(data);
-      console.log("Decoded QR data:", qrData);
+      // Use our Mina-enabled processQRData function from zkUtils
+      const result = await processQRData(data);
       
-      // Extract relevant data
-      const eventId = qrData.eventId;
-      let hashValue = null;
-      
-      // Handle different QR data formats
-      if (qrData.hash && typeof qrData.hash === 'string') {
-        try {
-          // If hash is another JSON string
-          const hashData = JSON.parse(qrData.hash);
-          if (hashData.proof && hashData.proof.hashValue) {
-            hashValue = hashData.proof.hashValue;
-          }
-        } catch {
-          // If hash is not a JSON string
-          hashValue = qrData.hash;
-        }
-      } else if (qrData.proof && qrData.proof.hashValue) {
-        hashValue = qrData.proof.hashValue;
+      if (!result) {
+        throw new Error("Failed to process ticket data");
       }
       
-      if (!eventId || !hashValue) {
-        throw new Error("Invalid QR code format");
+      const { isValid, eventId, ticketId, hashValue, protocol = "mina-poseidon" } = result;
+      
+      if (!eventId) {
+        throw new Error("Invalid ticket: missing event ID");
       }
-      
-      addToast(`Verifying hash: ${hashValue.substring(0, 8)}...`, "INFO");
-      
-      // Check local storage for ticket validation
-      const storedTickets = JSON.parse(localStorage.getItem('aetherTickets') || '{}');
-      const eventTickets = storedTickets[eventId] || [];
-      const isValid = eventTickets.some(ticket => ticket.hash === hashValue);
       
       // Set hash details for display
       setHashDetails({
         value: hashValue.length > 32 
           ? hashValue.substring(0, 16) + '...' + hashValue.substring(hashValue.length - 16)
           : hashValue,
-        algorithm: qrData.proof?.protocol || "SHA-256",
-        timestamp: new Date(qrData.proof?.timestamp || Date.now()).toLocaleString()
+        algorithm: protocol || "mina-poseidon",
+        timestamp: new Date().toLocaleString()
       });
       
       // Get event information
@@ -191,10 +190,10 @@ function Verify() {
       // Set ticket data for display
       setTicketData({
         eventId: eventId,
-        ticketId: qrData.ticketId || "Unknown",
+        ticketId: ticketId || "Unknown",
         timestamp: new Date().toLocaleTimeString(),
-        seat: qrData.seat || "General Admission",
-        ticketType: qrData.ticketType || "Standard"
+        seat: "General Admission", // Default value
+        ticketType: "Standard" // Default value
       });
       
       // Set event info
@@ -207,7 +206,7 @@ function Verify() {
       
       // Show result toast
       if (isValid) {
-        addToast("✅ Ticket successfully verified!", "SUCCESS", 5000);
+        addToast(`✅ Ticket verified using ${minaStatus ? 'Mina Protocol' : 'local verification'}!`, "SUCCESS", 5000);
       } else {
         addToast("❌ Invalid ticket detected", "ERROR", 5000);
       }
@@ -216,6 +215,8 @@ function Verify() {
       console.error("Error processing QR data:", error);
       setError(`Error processing QR code data: ${error.message}`);
       addToast(`Verification failed: ${error.message}`, "ERROR");
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -244,12 +245,13 @@ function Verify() {
         
         if (code) {
           addToast("QR code detected in image", "SUCCESS");
-          processQRData(code.data);
+          // Process with async handling
+          handleQRData(code.data);
         } else {
           setError("No QR code found in the image. Please try another image.");
           addToast("No QR code found in image", "ERROR");
+          setProcessing(false);
         }
-        setProcessing(false);
       };
       
       img.onerror = () => {
@@ -298,12 +300,20 @@ function Verify() {
           Verify Ticket
         </h1>
         
+        {/* Mina status indicator */}
+        <div className={`mb-4 rounded-lg p-2 px-4 text-sm inline-flex items-center ${minaStatus ? 'bg-green-900 bg-opacity-20 text-green-400' : 'bg-yellow-900 bg-opacity-20 text-yellow-400'}`}>
+          <div className={`h-2 w-2 rounded-full mr-2 ${minaStatus ? 'bg-green-400' : 'bg-yellow-400'}`}></div>
+          {minaStatus 
+            ? 'Powered by Mina Protocol ZK Proofs' 
+            : 'Using local verification mode'}
+        </div>
+        
         <div className="bg-surface p-6 rounded-xl border border-border-primary shadow-lg">
           {!ticketData && !verificationResult && (
             <>
               <div className="text-center mb-8">
                 <p className="text-text-secondary mb-6">
-                  Scan a ticket QR code to verify event access using cryptographic proof verification.
+                  Scan a ticket QR code to verify event access using {minaStatus ? 'zero-knowledge proofs.' : 'cryptographic verification.'}
                 </p>
                 
                 {scanning ? (
@@ -373,7 +383,7 @@ function Verify() {
                 <ul className="space-y-2 text-text-secondary text-sm">
                   <li className="flex items-start">
                     <span className="text-accent mr-2">•</span>
-                    <span>The QR code contains a cryptographic proof that verifies ticket authenticity</span>
+                    <span>The QR code contains a {minaStatus ? 'zero-knowledge proof' : 'cryptographic proof'} that verifies ticket authenticity</span>
                   </li>
                   <li className="flex items-start">
                     <span className="text-accent mr-2">•</span>
@@ -381,7 +391,7 @@ function Verify() {
                   </li>
                   <li className="flex items-start">
                     <span className="text-accent mr-2">•</span>
-                    <span>Verification happens entirely on your device - no server connection needed</span>
+                    <span>Verification happens entirely on your device {minaStatus && '- secured by Mina Protocol'}</span>
                   </li>
                 </ul>
               </div>
@@ -402,6 +412,7 @@ function Verify() {
                     </div>
                     <h2 className="text-2xl font-bold text-text-primary mb-2">Ticket Valid</h2>
                     <p className="text-text-secondary">This ticket is authentic and valid for entry.</p>
+                    {minaStatus && <p className="text-green-300 text-sm mt-2">Validated with Mina Protocol</p>}
                   </div>
                 ) : (
                   <div>
@@ -455,7 +466,7 @@ function Verify() {
                 <div className="mb-6 bg-blue-900 bg-opacity-10 p-4 rounded-xl border border-blue-700 text-blue-300">
                   <h3 className="text-lg font-medium mb-3 flex items-center">
                     <Sparkles className="w-5 h-5 mr-2" />
-                    Cryptographic Verification
+                    {minaStatus ? 'Zero-Knowledge Proof' : 'Cryptographic Verification'}
                   </h3>
                   <div className="text-sm space-y-2">
                     <div className="flex justify-between">
@@ -470,6 +481,11 @@ function Verify() {
                       <span>Timestamp:</span>
                       <span>{hashDetails.timestamp}</span>
                     </div>
+                    {minaStatus && (
+                      <div className="mt-2 text-xs bg-blue-900 bg-opacity-20 p-2 rounded">
+                        This hash is verified using Mina Protocol's Poseidon hash function, specially designed for zero-knowledge proofs
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

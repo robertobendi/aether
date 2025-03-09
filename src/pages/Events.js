@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
-import { CalendarDays, MapPin, Clock, X, Download } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { CalendarDays, MapPin, Clock, X, Download, ShieldCheck } from 'lucide-react';
 import QRCode from 'qrcode';
-import { generateTicketProof, storeTicketHash } from '../utils/zkUtils';
+import { generateTicketProof, storeTicketHash, isMinaAvailable } from '../utils/zkUtils';
 import websiteInfo from '../utils/websiteInfo';
 import AnimatedBackground from '../components/AnimatedBackground';
 import { useToast } from '../components/Toast';
@@ -18,6 +18,32 @@ function Events() {
   const [ticketGenerated, setTicketGenerated] = useState(false);
   const [ticketHash, setTicketHash] = useState('');
   const [qrCodeUrl, setQrCodeUrl] = useState('');
+  const [minaStatus, setMinaStatus] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  
+  // Add ref to track if we've shown the toast
+  const minaToastShown = useRef(false);
+
+  // Check Mina availability on component mount
+  useEffect(() => {
+    const checkMina = async () => {
+      try {
+        const available = await isMinaAvailable();
+        setMinaStatus(available);
+        
+        // Only show toast once using ref
+        if (available && !minaToastShown.current) {
+          addToast("Mina Protocol connected successfully", "SUCCESS");
+          minaToastShown.current = true;
+        }
+      } catch (error) {
+        console.error("Error checking Mina:", error);
+        setMinaStatus(false);
+      }
+    };
+    
+    checkMina();
+  }, []); // Remove addToast from dependencies array
 
   // Sample event data
   const events = [
@@ -78,16 +104,22 @@ function Events() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setIsGenerating(true);
     
     // Generate a ticket ID
     const ticketId = `TKT-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
     
     try {
       // Show starting process toast
-      addToast("Starting cryptographic ticket generation...", "INFO");
+      addToast(`Starting ${minaStatus ? 'zero-knowledge' : 'cryptographic'} ticket generation...`, "INFO");
       
-      // Generate actual cryptographic proof
-      addToast("Hashing your private information securely...", "INFO");
+      // Generate cryptographic proof
+      if (minaStatus) {
+        addToast("Creating Mina Protocol zero-knowledge proof...", "INFO");
+      } else {
+        addToast("Hashing your private information securely...", "INFO");
+      }
+      
       const zkProof = await generateTicketProof(
         selectedEvent.id,
         formData.email,
@@ -96,8 +128,11 @@ function Events() {
       );
       
       // Store the hash
-      addToast("Cryptographic proof generated successfully!", "SUCCESS");
-      storeTicketHash(zkProof.hashValue, selectedEvent.id);
+      if (zkProof.demoProof.protocol === 'mina-poseidon') {
+        addToast("Zero-knowledge proof generated successfully!", "SUCCESS");
+      } else {
+        addToast("Cryptographic proof generated successfully!", "SUCCESS");
+      }
       
       // Save the ticket ID for display
       setTicketHash(ticketId);
@@ -107,21 +142,26 @@ function Events() {
       const qrData = JSON.stringify({
         eventId: selectedEvent.id,
         ticketId: ticketId,
-        proof: zkProof.proof
+        // Include ZK proof data
+        proof: zkProof.demoProof,
+        leafIndex: zkProof.demoProof.leafIndex
       });
       
       // Log the proof details for demonstration
       console.log('Generated cryptographic ticket proof:', zkProof);
       
       // Generate QR code
-      generateQRCode(qrData);
+      await generateQRCode(qrData);
       
       // Show the ticket download section
       setTicketGenerated(true);
-      addToast("Your secure ticket is ready!", "SUCCESS", 5000);
+      const proofType = minaStatus ? 'zero-knowledge' : 'cryptographic';
+      addToast(`Your secure ticket with ${proofType} proof is ready!`, "SUCCESS", 5000);
     } catch (error) {
       console.error("Error generating ticket:", error);
       addToast(`Error: ${error.message}`, "ERROR", 5000);
+    } finally {
+      setIsGenerating(false);
     }
   };
   
@@ -171,10 +211,20 @@ function Events() {
       <AnimatedBackground />
       
       <div className="relative max-w-5xl mx-auto p-4 md:p-8 lg:p-12">
-        <h1 className="text-3xl font-semibold mb-8 text-text-primary">
+        <h1 className="text-3xl font-semibold mb-4 text-text-primary">
           Upcoming Events
         </h1>
 
+        {/* Mina status indicator */}
+        {minaStatus !== null && (
+          <div className={`mb-8 rounded-lg p-2 px-4 text-sm inline-flex items-center ${minaStatus ? 'bg-green-900 bg-opacity-20 text-green-400' : 'bg-yellow-900 bg-opacity-20 text-yellow-400'}`}>
+            <div className={`h-2 w-2 rounded-full mr-2 ${minaStatus ? 'bg-green-400' : 'bg-yellow-400'}`}></div>
+            {minaStatus 
+              ? 'Tickets are secured with Mina Protocol zero-knowledge proofs' 
+              : 'Using cryptographic verification'}
+          </div>
+        )}
+        
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {events.map((event) => (
             <div key={event.id} className="bg-surface rounded-lg overflow-hidden shadow-lg border border-border-primary">
@@ -289,15 +339,31 @@ function Events() {
                     </div>
                     
                     <div className="p-4 bg-background rounded-lg mb-6 text-sm text-text-secondary">
-                      <p className="mb-2 font-medium text-text-accent">Your privacy is protected</p>
-                      <p>Your personal details will be hashed securely in your browser using SHA-256. Only a cryptographic proof will be used for verification.</p>
+                      <div className="flex items-start mb-2">
+                        <ShieldCheck className="w-5 h-5 text-accent mr-2 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-medium text-accent mb-1">Your privacy is protected</p>
+                          <p>Your personal details will never leave your browser. {minaStatus 
+                            ? 'A zero-knowledge proof will be used for verification via Mina Protocol.' 
+                            : 'A secure cryptographic hash will be used for verification.'}
+                          </p>
+                        </div>
+                      </div>
                     </div>
                     
                     <button
                       type="submit"
-                      className="w-full py-3 bg-accent text-white rounded-lg hover:bg-opacity-90 transition-all duration-fast"
+                      disabled={isGenerating}
+                      className="w-full py-3 bg-accent text-white rounded-lg hover:bg-opacity-90 transition-all duration-fast disabled:opacity-50 flex items-center justify-center"
                     >
-                      Generate Ticket
+                      {isGenerating ? (
+                        <>
+                          <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+                          Generating...
+                        </>
+                      ) : (
+                        `Generate ${minaStatus ? 'ZK Ticket' : 'Ticket'}`
+                      )}
                     </button>
                   </form>
                 </>
@@ -320,6 +386,12 @@ function Events() {
                         <img src={qrCodeUrl} alt="Ticket QR Code" className="w-48 h-48" />
                       </div>
                     )}
+                    
+                    {minaStatus && (
+                      <div className="text-xs bg-blue-900 bg-opacity-20 p-2 rounded text-blue-300">
+                        Secured with Mina Protocol zero-knowledge proofs
+                      </div>
+                    )}
                   </div>
                   
                   <button
@@ -331,7 +403,7 @@ function Events() {
                   </button>
                   
                   <p className="mt-4 text-sm text-text-secondary">
-                    Your ticket includes a cryptographic proof that can be verified without revealing your personal information. Present the QR code at the event for verification.
+                    Your ticket includes a {minaStatus ? 'zero-knowledge proof' : 'cryptographic proof'} that can be verified without revealing your personal information. Present the QR code at the event for verification.
                   </p>
                 </div>
               )}
