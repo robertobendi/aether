@@ -1,83 +1,142 @@
 import { useState } from 'react';
 import { Camera, CheckCircle, XCircle, Upload } from 'lucide-react';
 import { verifyTicketProof } from '../utils/zkUtils';
+import QrScanner from 'qr-scanner'; // Add this library
 
 function Verify() {
   const [scanning, setScanning] = useState(false);
   const [verificationResult, setVerificationResult] = useState(null);
   const [ticketData, setTicketData] = useState(null);
   const [scanError, setScanError] = useState(null);
+  const [videoRef, setVideoRef] = useState(null);
+  const [scanner, setScanner] = useState(null);
 
-  // Simulated QR code scanning
-  const handleScan = async () => {
+  // Initialize scanner when the video element is ready
+  const handleVideoRef = (ref) => {
+    setVideoRef(ref);
+    if (ref && scanning) {
+      startScanner(ref);
+    }
+  };
+
+  // Start the QR scanner
+  const startScanner = async (videoElement) => {
+    try {
+      const qrScanner = new QrScanner(
+        videoElement,
+        result => {
+          handleQrResult(result.data);
+          stopScanner(qrScanner);
+        },
+        { returnDetailedScanResult: true }
+      );
+      
+      await qrScanner.start();
+      setScanner(qrScanner);
+    } catch (error) {
+      console.error("Error starting scanner:", error);
+      setScanError("Could not access camera. Please check permissions.");
+      setScanning(false);
+    }
+  };
+
+  // Stop the QR scanner
+  const stopScanner = (scannerInstance) => {
+    if (scannerInstance) {
+      scannerInstance.stop();
+      scannerInstance.destroy();
+      setScanner(null);
+    }
+    setScanning(false);
+  };
+
+  // Handle scan button click
+  const handleScan = () => {
     setScanError(null);
     setScanning(true);
     
-    // Simulate the scanning process
-    setTimeout(async () => {
-      try {
-        // In a real app, this would be the result of scanning a QR code
-        // Here we simulate finding a valid ticket in localStorage
-        const storedTickets = JSON.parse(localStorage.getItem('zkTickets') || '{}');
-        const eventIds = Object.keys(storedTickets);
-        
-        if (eventIds.length === 0) {
-          throw new Error("No tickets found. Please purchase a ticket first.");
-        }
-        
-        // Get a random event and its first ticket
-        const eventId = eventIds[0];
-        const ticket = storedTickets[eventId][0];
-        
-        // Simulate the ticket data from QR code
-        const simulatedTicketData = {
-          eventId: eventId,
-          ticketId: `TKT-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-          proof: {
-            hashValue: ticket.hash,
-            timestamp: ticket.timestamp
-          }
-        };
-        
-        setTicketData(simulatedTicketData);
-        
-        // Verify the ZK proof
-        const isValid = await verifyTicketProof(
-          JSON.stringify({ test: 'simulated-proof' }),  // In real app, this would be from QR code
-          JSON.stringify(['public', 'inputs'])         // In real app, this would be from QR code
-        );
-        
-        setVerificationResult(isValid);
-      } catch (error) {
-        console.error("Scan error:", error);
-        setScanError(error.message);
-      } finally {
-        setScanning(false);
+    if (videoRef) {
+      startScanner(videoRef);
+    }
+  };
+
+  // Process scanned QR code data
+  const handleQrResult = async (qrData) => {
+    try {
+      // Parse the QR code data
+      const parsedData = JSON.parse(qrData);
+      console.log("Parsed QR data:", parsedData);
+      
+      if (!parsedData.eventId || !parsedData.hash) {
+        throw new Error("Invalid ticket data format");
       }
-    }, 2000); // Simulate 2-second scanning time
+      
+      setTicketData({
+        eventId: parsedData.eventId,
+        ticketId: parsedData.ticketId || "Unknown",
+        timestamp: new Date().toLocaleTimeString()
+      });
+      
+      // Check if ticket exists in local storage
+      const storedTickets = JSON.parse(localStorage.getItem('zkTickets') || '{}');
+      const eventTickets = storedTickets[parsedData.eventId] || [];
+      
+      // Verify by checking if hash exists in stored tickets
+      let ticketFound = false;
+      if (parsedData.proof && parsedData.proof.hashValue) {
+        ticketFound = eventTickets.some(ticket => ticket.hash === parsedData.proof.hashValue);
+      } else if (parsedData.hash) {
+        // Alternative format
+        const hashData = JSON.parse(parsedData.hash);
+        ticketFound = eventTickets.some(ticket => ticket.hash === hashData.proof.hashValue);
+      }
+      
+      // Set verification result
+      setVerificationResult(ticketFound);
+      
+    } catch (error) {
+      console.error("Error processing QR code:", error);
+      setScanError(`Error processing QR code: ${error.message}`);
+      setScanning(false);
+    }
   };
   
+  // Handle file upload
   const handleUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     
+    setScanError(null);
+    
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        // In a real implementation, this would parse the QR code from the image
-        // Here we're just simulating a successful scan
-        await handleScan();
+        const imageUrl = event.target.result;
+        
+        // Scan the QR code from the image
+        const result = await QrScanner.scanImage(imageUrl, { returnDetailedScanResult: true });
+        handleQrResult(result.data);
+        
       } catch (error) {
-        setScanError("Failed to read QR code from image.");
+        console.error("Failed to read QR code from image:", error);
+        setScanError("Failed to read QR code from image. Please try another image or use the camera.");
       }
+    };
+    reader.onerror = () => {
+      setScanError("Error reading the uploaded file.");
     };
     reader.readAsDataURL(file);
   };
   
+  // Reset verification
   const resetVerification = () => {
     setVerificationResult(null);
     setTicketData(null);
     setScanError(null);
+    setScanning(false);
+    if (scanner) {
+      stopScanner(scanner);
+    }
   };
 
   return (
@@ -95,35 +154,54 @@ function Verify() {
                   Scan a ticket QR code to verify event access using zero-knowledge proof verification.
                 </p>
                 
-                <div className="flex flex-col items-center justify-center space-y-4">
-                  <button 
-                    onClick={handleScan}
-                    disabled={scanning}
-                    className="flex items-center justify-center px-4 py-3 bg-accent text-white rounded-lg w-full max-w-xs hover:bg-opacity-90 transition-all duration-fast disabled:opacity-50"
-                  >
-                    <Camera className="w-5 h-5 mr-2" />
-                    {scanning ? "Scanning..." : "Scan QR Code"}
-                  </button>
-                  
-                  <div className="flex items-center justify-center w-full">
-                    <div className="border-t border-border-primary w-full"></div>
-                    <span className="px-3 text-text-secondary text-sm">OR</span>
-                    <div className="border-t border-border-primary w-full"></div>
+                {scanning ? (
+                  <div className="mb-6">
+                    <div className="bg-black rounded-lg overflow-hidden w-full max-w-xs mx-auto mb-4 aspect-square">
+                      <video 
+                        ref={handleVideoRef}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        stopScanner(scanner);
+                        setScanning(false);
+                      }}
+                      className="px-4 py-2 bg-surface text-text-primary border border-border-primary rounded-lg hover:bg-opacity-90 transition-all duration-fast"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                  
-                  <label 
-                    className="flex items-center justify-center px-4 py-3 bg-surface text-text-primary border border-border-primary rounded-lg w-full max-w-xs hover:bg-opacity-90 cursor-pointer transition-all duration-fast"
-                  >
-                    <Upload className="w-5 h-5 mr-2" />
-                    Upload QR Image
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleUpload}
-                    />
-                  </label>
-                </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center space-y-4">
+                    <button 
+                      onClick={handleScan}
+                      className="flex items-center justify-center px-4 py-3 bg-accent text-white rounded-lg w-full max-w-xs hover:bg-opacity-90 transition-all duration-fast disabled:opacity-50"
+                    >
+                      <Camera className="w-5 h-5 mr-2" />
+                      Scan QR Code
+                    </button>
+                    
+                    <div className="flex items-center justify-center w-full">
+                      <div className="border-t border-border-primary w-full"></div>
+                      <span className="px-3 text-text-secondary text-sm">OR</span>
+                      <div className="border-t border-border-primary w-full"></div>
+                    </div>
+                    
+                    <label 
+                      className="flex items-center justify-center px-4 py-3 bg-surface text-text-primary border border-border-primary rounded-lg w-full max-w-xs hover:bg-opacity-90 cursor-pointer transition-all duration-fast"
+                    >
+                      <Upload className="w-5 h-5 mr-2" />
+                      Upload QR Image
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleUpload}
+                      />
+                    </label>
+                  </div>
+                )}
               </div>
               
               {scanError && (
@@ -181,7 +259,7 @@ function Verify() {
                   </div>
                   <div className="flex justify-between py-1">
                     <span>Verification Time:</span>
-                    <span>{new Date().toLocaleTimeString()}</span>
+                    <span>{ticketData.timestamp}</span>
                   </div>
                 </div>
               </div>

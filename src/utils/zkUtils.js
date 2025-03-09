@@ -53,13 +53,14 @@ export const generateTicketProof = async (eventId, email, name, ticketId) => {
 };
 
 // Verify a ticket proof
-export const verifyTicketProof = async (proof, publicSignals) => {
-  // In a real app, this would verify the ZK proof
-  // For hackathon demo, we'll simulate verification
-  
+export const verifyTicketProof = async (hash, eventId) => {
   try {
-    // Simple simulation of verification
-    return true;
+    // Get stored tickets for this event
+    const storedTickets = JSON.parse(localStorage.getItem('zkTickets') || '{}');
+    const eventTickets = storedTickets[eventId] || [];
+    
+    // Check if this hash exists in the tickets
+    return eventTickets.some(ticket => ticket.hash === hash);
   } catch (error) {
     console.error("Error verifying proof:", error);
     return false;
