@@ -24,8 +24,9 @@ function Home() {
           <div className="flex flex-col md:flex-row items-center justify-between">
             {/* Left Column: Text and Call to Actions */}
             <div className="md:w-1/2 text-left mb-8 md:mb-0">
-              <h1 className="text-5xl font-bold text-text-primary mb-5">
-                <span className="text-accent">Aether</span>
+              {/* Animated Gradient Title */}
+              <h1 className="text-7xl font-bold mb-5 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-accent to-blue-600 animate-gradient-x">
+                Aether
               </h1>
               <p className="text-text-secondary text-lg mb-6">
                 A decentralized ticketing platform powered by zero-knowledge proofs. 

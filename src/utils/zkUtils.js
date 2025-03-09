@@ -1,95 +1,119 @@
-// Simplified version without Node.js dependencies for hackathon demo
-// In a real implementation, you would use actual ZK libraries
+/**
+ * Utilities for zero-knowledge proof ticket generation and verification
+ * 
+ * Note: This is a simplified simulation for demo purposes.
+ * A real implementation would use actual ZK libraries like circom, snarkjs, etc.
+ */
 
-// Simple hash function for demo purposes
-const simpleHash = async (data) => {
-  const encoder = new TextEncoder();
-  const encodedData = encoder.encode(data);
+// Simple hash function for demonstration
+const simpleHash = (data) => {
+  let hash = 0;
+  const str = JSON.stringify(data);
   
-  // Use Web Crypto API for hashing
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encodedData);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
   
-  return hashHex;
+  // Convert to hex and ensure it's positive
+  return Math.abs(hash).toString(16).padStart(8, '0');
 };
 
-// Generate a ZK proof for ticket ownership (simplified for demo)
+/**
+ * Generate a simulated zero-knowledge proof for a ticket
+ * 
+ * @param {string} eventId - ID of the event
+ * @param {string} email - User's email (private)
+ * @param {string} name - User's name (private)
+ * @param {string} ticketId - Generated ticket ID
+ * @returns {Object} - Object containing the proof and demo data
+ */
 export const generateTicketProof = async (eventId, email, name, ticketId) => {
-  try {
-    // Hash the user data
-    const userDataString = `${email}:${name}:${ticketId}`;
-    const userDataHash = await simpleHash(userDataString);
-    
-    // Hash the event data
-    const eventHash = await simpleHash(eventId);
-    
-    // Create a commitment that doesn't reveal the user data
-    const commitment = await simpleHash(`${eventHash}:${userDataHash}`);
-    
-    // For a hackathon demo, simulate a ZK proof
-    // In a real ZK implementation, this would be an actual ZK proof
-    return {
-      // The proof contains NO personal information
-      demoProof: {
-        eventId: eventId,
-        hashValue: commitment,
-        timestamp: Date.now()
-      }
-    };
-  } catch (error) {
-    console.error("Error generating proof:", error);
-    
-    // Fallback for demo
-    return {
-      simulated: true,
-      demoProof: {
-        eventId,
-        hashValue: `zk-${Math.random().toString(36).substring(2, 15)}`,
-        timestamp: Date.now()
-      }
-    };
-  }
-};
-
-// Verify a ticket proof
-export const verifyTicketProof = async (hash, eventId) => {
-  try {
-    // Get stored tickets for this event
-    const storedTickets = JSON.parse(localStorage.getItem('zkTickets') || '{}');
-    const eventTickets = storedTickets[eventId] || [];
-    
-    // Check if this hash exists in the tickets
-    return eventTickets.some(ticket => ticket.hash === hash);
-  } catch (error) {
-    console.error("Error verifying proof:", error);
-    return false;
-  }
-};
-
-// Store ticket hash in local storage
-export const storeTicketHash = (ticketHash, eventId) => {
-  try {
-    // Get existing tickets from local storage
-    const storedTickets = localStorage.getItem('zkTickets') || '{}';
-    const tickets = JSON.parse(storedTickets);
-    
-    // Add new ticket
-    if (!tickets[eventId]) {
-      tickets[eventId] = [];
+  // In a real implementation, this would generate actual ZK proofs
+  // For this demo, we'll simulate it
+  
+  // Create a private input object (this would be kept secret in a real system)
+  const privateInputs = {
+    email,
+    name,
+    timestamp: Date.now(),
+    ticketId
+  };
+  
+  // Create public inputs (these would be shared)
+  const publicInputs = {
+    eventId,
+    ticketId
+  };
+  
+  // Generate a "hash" for verification (simulating a Merkle tree inclusion proof)
+  const hashValue = simpleHash({ privateInputs, publicInputs });
+  
+  // Simulate time spent generating proof
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // Return the "proof" - in a real system this would be a complex ZK proof
+  // Here we just return the hash and some metadata
+  return {
+    publicInputs,
+    // In an actual system, we would not return private inputs!
+    // This is for demo purposes only
+    demoProof: {
+      hashValue,
+      protocol: "simulated-groth16",
+      proofGenerationTime: 500,
+      timestamp: Date.now()
     }
-    
-    tickets[eventId].push({
-      hash: ticketHash,
+  };
+};
+
+/**
+ * Store a ticket hash in local storage for verification
+ * Note: In a real system, this would be stored in a smart contract or database
+ * 
+ * @param {string} hash - The ticket hash to store
+ * @param {string} eventId - ID of the event the ticket is for
+ */
+export const storeTicketHash = (hash, eventId) => {
+  // Get existing tickets from storage or initialize empty object
+  const existingTickets = JSON.parse(localStorage.getItem('aetherTickets') || '{}');
+  
+  // Get event tickets or initialize empty array
+  const eventTickets = existingTickets[eventId] || [];
+  
+  // Add the new ticket hash if it doesn't exist already
+  if (!eventTickets.some(ticket => ticket.hash === hash)) {
+    eventTickets.push({
+      hash,
       timestamp: Date.now()
     });
-    
-    // Save back to local storage
-    localStorage.setItem('zkTickets', JSON.stringify(tickets));
-    
-    return true;
-  } catch (error) {
-    console.error("Error storing ticket hash:", error);
-    return false;
   }
+  
+  // Update the event tickets
+  existingTickets[eventId] = eventTickets;
+  
+  // Save back to local storage
+  localStorage.setItem('aetherTickets', JSON.stringify(existingTickets));
+  
+  return true;
+};
+
+/**
+ * Verify a ticket hash
+ * Note: In a real system, this would check a smart contract or database
+ * 
+ * @param {string} hash - The ticket hash to verify
+ * @param {string} eventId - ID of the event the ticket is for
+ * @returns {boolean} - Whether the ticket is valid
+ */
+export const verifyTicketHash = (hash, eventId) => {
+  // Get existing tickets from storage
+  const existingTickets = JSON.parse(localStorage.getItem('aetherTickets') || '{}');
+  
+  // Get event tickets or return false if none exist
+  const eventTickets = existingTickets[eventId] || [];
+  
+  // Check if the hash exists in the tickets
+  return eventTickets.some(ticket => ticket.hash === hash);
 };
