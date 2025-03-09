@@ -9,6 +9,7 @@
     "@testing-library/user-event": "^13.5.0",
     "circomlibjs": "^0.1.7",
     "framer-motion": "^12.4.10",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.468.0",
     "qr-scanner": "^1.4.2",
     "qrcode": "^1.5.4",
