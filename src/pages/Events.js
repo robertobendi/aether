@@ -4,8 +4,10 @@ import QRCode from 'qrcode';
 import { generateTicketProof, storeTicketHash } from '../utils/zkUtils';
 import websiteInfo from '../utils/websiteInfo';
 import AnimatedBackground from '../components/AnimatedBackground';
+import { useToast } from '../components/Toast';
 
 function Events() {
+  const { addToast } = useToast();
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [formData, setFormData] = useState({
@@ -81,7 +83,11 @@ function Events() {
     const ticketId = `TKT-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
     
     try {
-      // Generate actual ZK proof
+      // Show starting process toast
+      addToast("Starting cryptographic ticket generation...", "INFO");
+      
+      // Generate actual cryptographic proof
+      addToast("Hashing your private information securely...", "INFO");
       const zkProof = await generateTicketProof(
         selectedEvent.id,
         formData.email,
@@ -89,36 +95,39 @@ function Events() {
         ticketId
       );
       
-      // Store the hash in local storage (simulated Merkle tree)
-      storeTicketHash(zkProof.demoProof.hashValue, selectedEvent.id);
+      // Store the hash
+      addToast("Cryptographic proof generated successfully!", "SUCCESS");
+      storeTicketHash(zkProof.hashValue, selectedEvent.id);
       
-      // Save the hash for display
+      // Save the ticket ID for display
       setTicketHash(ticketId);
       
       // Generate QR code with the proof data
+      addToast("Creating secure QR code...", "INFO");
       const qrData = JSON.stringify({
         eventId: selectedEvent.id,
         ticketId: ticketId,
-        // Include ZK proof data (only demo proof for display)
-        proof: zkProof.demoProof
+        proof: zkProof.proof
       });
+      
+      // Log the proof details for demonstration
+      console.log('Generated cryptographic ticket proof:', zkProof);
       
       // Generate QR code
       generateQRCode(qrData);
       
-      console.log('Generated ZK ticket proof:', zkProof);
-      
       // Show the ticket download section
       setTicketGenerated(true);
+      addToast("Your secure ticket is ready!", "SUCCESS", 5000);
     } catch (error) {
       console.error("Error generating ticket:", error);
-      alert("There was an error generating your ticket. Please try again.");
+      addToast(`Error: ${error.message}`, "ERROR", 5000);
     }
   };
   
   const generateQRCode = async (hashData) => {
     try {
-      // Create a JSON object with ticket data (this would be the ZK proof in production)
+      // Create a JSON object with ticket data
       const ticketData = JSON.stringify({
         eventId: selectedEvent.id,
         hash: hashData,
@@ -128,30 +137,32 @@ function Events() {
       // Generate QR code as data URL
       const qrDataUrl = await QRCode.toDataURL(ticketData);
       setQrCodeUrl(qrDataUrl);
+      addToast("QR code generated successfully", "SUCCESS");
     } catch (err) {
       console.error("Error generating QR code:", err);
+      addToast(`Error generating QR code: ${err.message}`, "ERROR");
     }
   };
 
   const handleDownloadTicket = () => {
-    // In a real implementation, this would:
-    // 1. Generate a downloadable ticket with embedded ZK proof
-    // 2. The proof would allow verification without revealing personal data
-    
-    // Create a download link for the QR code
-    const downloadLink = document.createElement('a');
-    downloadLink.href = qrCodeUrl;
-    downloadLink.download = `aether-ticket-${selectedEvent.id}.png`;
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    document.body.removeChild(downloadLink);
-    
-    console.log('Downloading ticket');
-    
-    // Close the modal after download
-    setTimeout(() => {
-      handleCloseModal();
-    }, 500);
+    try {
+      // Create a download link for the QR code
+      const downloadLink = document.createElement('a');
+      downloadLink.href = qrCodeUrl;
+      downloadLink.download = `aether-ticket-${selectedEvent.id}.png`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      
+      addToast("Ticket downloaded successfully!", "SUCCESS");
+      
+      // Close the modal after download
+      setTimeout(() => {
+        handleCloseModal();
+      }, 500);
+    } catch (err) {
+      addToast(`Error downloading ticket: ${err.message}`, "ERROR");
+    }
   };
 
   return (
@@ -214,7 +225,7 @@ function Events() {
 
       {/* Ticket Purchase Modal */}
       {showTicketModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-40 p-4">
           <div className="bg-surface border border-border-primary rounded-lg shadow-lg max-w-md w-full animate-fade-in">
             <div className="flex justify-between items-center p-5 border-b border-border-primary">
               <h3 className="text-xl font-semibold text-text-primary">
@@ -279,7 +290,7 @@ function Events() {
                     
                     <div className="p-4 bg-background rounded-lg mb-6 text-sm text-text-secondary">
                       <p className="mb-2 font-medium text-text-accent">Your privacy is protected</p>
-                      <p>Your personal details will be hashed securely in your browser. Only a zero-knowledge proof will be used for verification.</p>
+                      <p>Your personal details will be hashed securely in your browser using SHA-256. Only a cryptographic proof will be used for verification.</p>
                     </div>
                     
                     <button
@@ -320,7 +331,7 @@ function Events() {
                   </button>
                   
                   <p className="mt-4 text-sm text-text-secondary">
-                    Your ticket includes a zero-knowledge proof that can be verified without revealing your personal information. Present the QR code at the event for verification.
+                    Your ticket includes a cryptographic proof that can be verified without revealing your personal information. Present the QR code at the event for verification.
                   </p>
                 </div>
               )}

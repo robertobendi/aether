@@ -2,14 +2,17 @@ import { useState, useRef, useEffect } from 'react';
 import { CheckCircle, XCircle, Upload, Camera, X, Calendar, Clock, MapPin, Users, Sparkles } from 'lucide-react';
 import jsQR from 'jsqr';
 import AnimatedBackground from '../components/AnimatedBackground';
+import { useToast } from '../components/Toast';
 
 function Verify() {
+  const { addToast } = useToast();
   const [verificationResult, setVerificationResult] = useState(null);
   const [ticketData, setTicketData] = useState(null);
   const [eventInfo, setEventInfo] = useState(null);
   const [error, setError] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [hashDetails, setHashDetails] = useState(null);
   
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -59,6 +62,7 @@ function Verify() {
     setScanning(true);
     
     try {
+      addToast("Initializing camera for QR scanning...", "INFO");
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { facingMode: 'environment' } 
       });
@@ -68,10 +72,12 @@ function Verify() {
         videoRef.current.srcObject = stream;
         videoRef.current.play();
         requestAnimationRef.current = requestAnimationFrame(scanQRCode);
+        addToast("Camera active - position QR code in frame", "INFO");
       }
     } catch (err) {
       console.error("Error accessing camera:", err);
       setError(`Camera access error: ${err.message}. Try uploading an image instead.`);
+      addToast(`Camera error: ${err.message}`, "ERROR");
       setScanning(false);
     }
   };
@@ -116,6 +122,7 @@ function Verify() {
         if (code) {
           // Stop scanning
           stopCamera();
+          addToast("QR code detected!", "SUCCESS");
           
           // Process the QR code
           processQRData(code.data);
@@ -132,6 +139,8 @@ function Verify() {
 
   const processQRData = (data) => {
     try {
+      addToast("Processing cryptographic data...", "INFO");
+      
       // Parse the QR data
       const qrData = JSON.parse(data);
       console.log("Decoded QR data:", qrData);
@@ -160,10 +169,21 @@ function Verify() {
         throw new Error("Invalid QR code format");
       }
       
+      addToast(`Verifying hash: ${hashValue.substring(0, 8)}...`, "INFO");
+      
       // Check local storage for ticket validation
       const storedTickets = JSON.parse(localStorage.getItem('aetherTickets') || '{}');
       const eventTickets = storedTickets[eventId] || [];
       const isValid = eventTickets.some(ticket => ticket.hash === hashValue);
+      
+      // Set hash details for display
+      setHashDetails({
+        value: hashValue.length > 32 
+          ? hashValue.substring(0, 16) + '...' + hashValue.substring(hashValue.length - 16)
+          : hashValue,
+        algorithm: qrData.proof?.protocol || "SHA-256",
+        timestamp: new Date(qrData.proof?.timestamp || Date.now()).toLocaleString()
+      });
       
       // Get event information
       const event = eventsDB[eventId];
@@ -185,20 +205,30 @@ function Verify() {
       // Set verification result
       setVerificationResult(isValid);
       
+      // Show result toast
+      if (isValid) {
+        addToast("✅ Ticket successfully verified!", "SUCCESS", 5000);
+      } else {
+        addToast("❌ Invalid ticket detected", "ERROR", 5000);
+      }
+      
     } catch (error) {
       console.error("Error processing QR data:", error);
       setError(`Error processing QR code data: ${error.message}`);
+      addToast(`Verification failed: ${error.message}`, "ERROR");
     }
   };
 
   const processImage = (file) => {
     setProcessing(true);
     setError(null);
+    addToast("Processing uploaded image...", "INFO");
     
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
+        addToast("Scanning image for QR code...", "INFO");
         // Create canvas to process the image
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
@@ -213,15 +243,18 @@ function Verify() {
         const code = jsQR(imageData.data, imageData.width, imageData.height);
         
         if (code) {
+          addToast("QR code detected in image", "SUCCESS");
           processQRData(code.data);
         } else {
           setError("No QR code found in the image. Please try another image.");
+          addToast("No QR code found in image", "ERROR");
         }
         setProcessing(false);
       };
       
       img.onerror = () => {
         setError("Failed to load the image. Please try another file.");
+        addToast("Failed to load image", "ERROR");
         setProcessing(false);
       };
       
@@ -230,6 +263,7 @@ function Verify() {
     
     reader.onerror = () => {
       setError("Error reading the file. Please try again.");
+      addToast("Error reading file", "ERROR");
       setProcessing(false);
     };
     
@@ -249,8 +283,10 @@ function Verify() {
     setVerificationResult(null);
     setTicketData(null);
     setEventInfo(null);
+    setHashDetails(null);
     setError(null);
     stopCamera();
+    addToast("Verification reset", "INFO");
   };
 
   return (
@@ -267,7 +303,7 @@ function Verify() {
             <>
               <div className="text-center mb-8">
                 <p className="text-text-secondary mb-6">
-                  Scan a ticket QR code to verify event access using zero-knowledge proof verification.
+                  Scan a ticket QR code to verify event access using cryptographic proof verification.
                 </p>
                 
                 {scanning ? (
@@ -337,7 +373,7 @@ function Verify() {
                 <ul className="space-y-2 text-text-secondary text-sm">
                   <li className="flex items-start">
                     <span className="text-accent mr-2">•</span>
-                    <span>The QR code contains a zero-knowledge proof that verifies ticket authenticity</span>
+                    <span>The QR code contains a cryptographic proof that verifies ticket authenticity</span>
                   </li>
                   <li className="flex items-start">
                     <span className="text-accent mr-2">•</span>
@@ -409,6 +445,30 @@ function Verify() {
                         <Users className="w-4 h-4 mr-2 text-accent" />
                         <span className="text-text-secondary text-sm">{eventInfo.attendees} attendees</span>
                       </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Cryptographic Details */}
+              {hashDetails && (
+                <div className="mb-6 bg-blue-900 bg-opacity-10 p-4 rounded-xl border border-blue-700 text-blue-300">
+                  <h3 className="text-lg font-medium mb-3 flex items-center">
+                    <Sparkles className="w-5 h-5 mr-2" />
+                    Cryptographic Verification
+                  </h3>
+                  <div className="text-sm space-y-2">
+                    <div className="flex justify-between">
+                      <span>Hash:</span>
+                      <span className="font-mono">{hashDetails.value}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Algorithm:</span>
+                      <span>{hashDetails.algorithm}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Timestamp:</span>
+                      <span>{hashDetails.timestamp}</span>
                     </div>
                   </div>
                 </div>
