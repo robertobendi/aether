@@ -21,10 +21,6 @@ export default {
         path: "/events",
       },
       {
-        label: "My Tickets",
-        path: "/tickets",
-      },
-      {
         label: "Verify",
         path: "/verify",
       },
